@@ -35,14 +35,14 @@
 <div id="menu">
   <div class="card">
     <h1>CHAOS CAT</h1>
-    <p class="tag">The human just left. The house is yours. You've got 3 minutes before they're back.</p>
+    <p class="tag">The human is home, glued to their phone. You've got 3 minutes to make them regret adopting you.</p>
     <div class="btns">
       <button id="play">Play on laptop</button>
       <button id="vr" hidden>Enter VR</button>
     </div>
     <div class="controls">
-      <div><b>Oculus Go</b> touchpad = walk where you look · click touchpad = jump · trigger = swat (aim with controller)</div>
-      <div><b>Laptop</b> WASD / arrows = walk · touchpad / mouse = look · click = swat · Space = jump · Shift = zoomies · M = meow · R = restart</div>
+      <div><b>Oculus Go</b> touchpad = walk · click touchpad = jump · your paw pushes whatever it touches · trigger = swat / use tool · trigger at a wall = claws in (touchpad climbs) · point at your feet + trigger = switch tool (paw → taser → shaver)</div>
+      <div><b>Laptop</b> WASD = walk · mouse = look · click = swat / use tool (hold for shaver) · click a wall up close = claws in, W/S climb, Space leap off · Q or right-click = switch tool · Z / C = twist paw · Shift = zoomies · M = meow · R = restart</div>
     </div>
     <p id="msg"></p>
   </div>
@@ -71,6 +71,7 @@ var ROOM = { minX: -5, maxX: 5, minZ: -4, maxZ: 4, h: 2.7 };
 
 function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 function rand(a, b) { return a + Math.random() * (b - a); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 // ================= RENDERER =================
 var renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -246,8 +247,18 @@ box(-3.5, 0.36, -1.0, -2.5, 0.42, 0.0, 0x6b4a33);       // coffee table
 [[-3.45, -0.95], [-2.55, -0.95], [-3.45, -0.05], [-2.55, -0.05]].forEach(function (l) {
   box(l[0] - 0.03, 0, l[1] - 0.03, l[0] + 0.03, 0.36, l[1] + 0.03, 0x4f3524);
 });
-bake(new THREE.CircleGeometry(1.45, 28), 0xc2735a, -3.0, 0.004, -0.5, -Math.PI / 2, 0, 0); // rug
-bake(new THREE.CircleGeometry(1.05, 28), 0xe0a96d, -3.0, 0.006, -0.5, -Math.PI / 2, 0, 0);
+var RUG = { x: -3.0, z: -0.5, r: 1.45 };
+var rugCanvas = document.createElement('canvas'); rugCanvas.width = rugCanvas.height = 256;
+function drawRug() {
+  var c = rugCanvas.getContext('2d'); c.clearRect(0, 0, 256, 256);
+  c.fillStyle = '#c2735a'; c.beginPath(); c.arc(128, 128, 127, 0, 7); c.fill();
+  c.fillStyle = '#e0a96d'; c.beginPath(); c.arc(128, 128, 92, 0, 7); c.fill();
+  c.strokeStyle = '#c98a55'; c.lineWidth = 5; for (var rr = 22; rr < 92; rr += 18) { c.beginPath(); c.arc(128, 128, rr, 0, 7); c.stroke(); }
+}
+drawRug();
+var rugTex = new THREE.CanvasTexture(rugCanvas);
+var rug = new THREE.Mesh(new THREE.CircleGeometry(RUG.r, 32), new THREE.MeshLambertMaterial({ map: rugTex }));
+rug.rotation.x = -Math.PI / 2; rug.position.set(RUG.x, 0.005, RUG.z); scene.add(rug);
 // wall art above couch
 deco(-4.995, 1.2, -1.3, -4.975, 1.9, 0.3, 0x2f2f36);
 deco(-4.975, 1.25, -1.25, -4.97, 1.85, -0.5, 0xf2b84b);
@@ -378,6 +389,10 @@ var SFX = {
     g.gain.setValueAtTime(0.5, t + 0.35); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
     o.connect(bp); bp.connect(g); g.connect(master); o.start(t); o.stop(t + 0.65);
   },
+  zap: function () { var t = actx.currentTime; tn(t, 0.6, 'sawtooth', 95, 88, 0.12);
+    for (var i = 0; i < 14; i++) nz(t + Math.random() * 0.55, 0.03, 'highpass', 3000, 3000, 0.7, 0.35); },
+  claw: function () { var t = actx.currentTime; for (var i = 0; i < 3; i++) nz(t + i * 0.05, 0.05, 'bandpass', 2600, 1800, 3, 0.3); },
+  click: function () { var t = actx.currentTime; tn(t, 0.04, 'square', 900, 700, 0.08); },
   ding: function () { var t = actx.currentTime; [660, 880, 1320].forEach(function (f, i) { tn(t + i * 0.1, 0.25, 'triangle', f, f, 0.2); }); },
   doom: function () { var t = actx.currentTime; nz(t, 0.6, 'lowpass', 200, 120, 1, 0.4);
     [392, 370, 294].forEach(function (f, i) { tn(t + 0.5 + i * 0.35, i === 2 ? 1.0 : 0.3, 'sawtooth', f, f * (i === 2 ? 0.95 : 1), 0.15); }); }
@@ -432,6 +447,7 @@ function addProp(o) {
   p.restRot = o.obj.rotation.clone();
   o.obj.traverse(function (c) { if (c.material) p.mats.push(c.material); });
   o.obj.position.set(p.x, p.y, p.z);
+  o.obj.userData.prop = p;
   propRoot.add(o.obj);
   props.push(p);
   return p;
@@ -562,7 +578,8 @@ function spawnProps() {
 
 // ================= ROBO-VAC =================
 var vac = { x: 0.6, z: 1.6, ang: 0.4, spinLeft: 0, spinDir: 1, dx: 0, dz: 0, t: 0 };
-vac.box = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0.085, maxZ: 0, vac: true };
+vac.box = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0.085, maxZ: 0, vac: true, mover: true, dx: 0, dz: 0 };
+vac.haywire = 0;
 solids.push(vac.box);
 vac.mesh = new THREE.Group();
 vac.mesh.add(mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.08, 20), new THREE.MeshLambertMaterial({ color: 0x2b2d33 })));
@@ -597,7 +614,15 @@ function vacBlocked(x, z) {
 function updateVac(dt) {
   var ox = vac.x, oz = vac.z;
   vac.t += dt;
-  if (vac.spinLeft > 0) {
+  if (vac.haywire > 0) {                                   // tasered: robo-vac goes ROGUE
+    vac.haywire -= dt;
+    vac.ang += (Math.sin(vac.t * 7) * 5 + rand(-3, 3)) * dt;
+    var hx = vac.x + Math.cos(vac.ang) * 1.6 * dt, hz = vac.z + Math.sin(vac.ang) * 1.6 * dt;
+    if (vacBlocked(hx, hz)) vac.ang += Math.PI * rand(0.6, 1.4); else { vac.x = hx; vac.z = hz; }
+    ring.material.color.setHex(Math.sin(vac.t * 30) > 0 ? 0xff3030 : 0x3dff9a);
+    if (Math.random() < 0.15) spawnShards(vac.x, 0.1, vac.z, 0x8fe8ff, 1, 0);
+    if (vac.haywire <= 0) ring.material.color.setHex(0x3dff9a);
+  } else if (vac.spinLeft > 0) {
     var s = Math.min(vac.spinLeft, 2.2 * dt); vac.ang += s * vac.spinDir; vac.spinLeft -= s;
   } else {
     vac.ang += Math.sin(vac.t * 0.4) * 0.25 * dt;
@@ -605,7 +630,7 @@ function updateVac(dt) {
     if (vacBlocked(nx, nz2)) { vac.spinLeft = rand(1.2, 2.8); vac.spinDir = Math.random() < 0.5 ? -1 : 1; }
     else { vac.x = nx; vac.z = nz2; }
   }
-  vac.dx = vac.x - ox; vac.dz = vac.z - oz;
+  vac.dx = vac.x - ox; vac.dz = vac.z - oz; vac.box.dx = vac.dx; vac.box.dz = vac.dz;
   vac.box.minX = vac.x - 0.17; vac.box.maxX = vac.x + 0.17; vac.box.minZ = vac.z - 0.17; vac.box.maxZ = vac.z + 0.17;
   vac.mesh.position.set(vac.x, 0.04, vac.z);
   vac.mesh.rotation.y = -vac.ang;
@@ -615,12 +640,13 @@ function updateVac(dt) {
 var player = { x: 0, y: 0, z: 2.6, vx: 0, vz: 0, vy: 0, onGround: true, support: null };
 var yaw = 0, pitch = -0.1;
 
-function updatePlayer(dt, wx, wz, wantJump) {
+function updatePlayer(dt, wx, wz, wantJump, rawX, rawZ) {
+  if (player.cling) { updateCling(dt, rawX || 0, rawZ || 0, wantJump); return; }
   var k = Math.min(1, (player.onGround ? 14 : 5) * dt);
   player.vx += (wx - player.vx) * k;
   player.vz += (wz - player.vz) * k;
   if (wantJump && player.onGround) { player.vy = JUMP_V; player.onGround = false; player.support = null; sfx('mrrp'); }
-  if (player.support === vac.box) { player.x += vac.dx; player.z += vac.dz; }
+  if (player.support && player.support.dx !== undefined) { player.x += player.support.dx; player.z += player.support.dz; }
 
   player.x += player.vx * dt; player.z += player.vz * dt;
   for (var it = 0; it < 2; it++) {
@@ -682,7 +708,7 @@ function updateProps(dt) {
       var len = Math.sqrt(push.x * push.x + push.z * push.z) || 1, nx = push.x / len, nz = push.z / len;
       var vn = p.vx * nx + p.vz * nz;
       if (vn < 0) { p.vx -= 1.35 * vn * nx; p.vz -= 1.35 * vn * nz; }
-      if (b.vac) { p.vx += nx * 0.5; p.vz += nz * 0.5; }
+      if (b.mover) { p.vx += nx * 0.5; p.vz += nz * 0.5; }
     }
     if (p.x < ROOM.minX + p.r) { p.x = ROOM.minX + p.r; p.vx = Math.abs(p.vx) * 0.3; }
     if (p.x > ROOM.maxX - p.r) { p.x = ROOM.maxX - p.r; p.vx = -Math.abs(p.vx) * 0.3; }
@@ -709,7 +735,7 @@ function updateProps(dt) {
       else {
         p.vy = 0; p.grounded = true; p.lastGroundY = ground;
         var f = Math.exp(-p.friction * dt); p.vx *= f; p.vz *= f;
-        if (gb && gb.vac) { p.x += vac.dx; p.z += vac.dz; }
+        if (gb && gb.dx !== undefined) { p.x += gb.dx; p.z += gb.dz; }
       }
     } else if (p.grounded) {
       p.grounded = false;
@@ -839,7 +865,10 @@ var MISSIONS = [
   { id: 'plants', text: 'evict 2 pot plants', n: 2 },
   { id: 'remote', text: 'hide the TV remote (floor)', n: 1 },
   { id: 'fridge', text: 'sit on top of the fridge', n: 1 },
-  { id: 'vac', text: 'ride the robo-vac (3 sec)', n: 1 }
+  { id: 'vac', text: 'ride the robo-vac (3 sec)', n: 1 },
+  { id: 'zap', text: 'taser the human', n: 1 },
+  { id: 'haircut', text: 'shave the human BALD', n: 12 },
+  { id: 'climb', text: 'climb the wall to the ceiling', n: 1 }
 ];
 var state = 'menu', score = 0, combo = 1, lastScoreT = -10, timeLeft = GAME_TIME, gameT = 0, endT = 0, rideT = 0;
 var hudDirty = true, toast = '', toastT = 0;
@@ -875,11 +904,15 @@ function smash(p) {
   if (p.type === 'vase') progress('vase');
   if (p.type === 'bauble') progress('baubles');
   if (p.type === 'pot') progress('plants');
+  var LINES = { vase: ["MY GRANDMA'S VASE!!", 'NOT THE VASE!'], bauble: ['The TREE!', 'Those were VINTAGE!'], mug: ['My MUG!', 'HEY!'],
+    lamp: ['My lamp!', 'BAD KITTY!'], pot: ['My plants!!', 'Why are you like this?!'] };
+  humanNotice(p.x, g, p.z, pick(LINES[p.type] || ['HEY!', 'BAD KITTY!', 'Oh come ON.', 'Seriously?!']));
 }
 function onKnockOff(p) {
   addScore(p.pts, '', p.x, p.y, p.z, '#7be0c3');
   if (p.type === 'book') progress('books');
   if (p.type === 'remote') progress('remote');
+  if (Math.random() < 0.5) humanNotice(p.x, p.y, p.z, pick(['Hey!', 'Cat. No.', 'I SAW that.', 'Put that back!']));
 }
 
 // ================= HUD (3D panel stuck to your face) =================
@@ -913,8 +946,8 @@ function drawHUD() {
   ctx.fillText('x' + combo, w - 34, 66);
   var line = toastT > 0 ? toast : '';
   if (!line) { var nx = null; for (var i = 0; i < MISSIONS.length; i++) if (!MISSIONS[i].done) { nx = MISSIONS[i]; break; }
-    line = nx ? 'NEXT: ' + nx.text + (nx.n > 1 ? '  (' + (nx.count || 0) + '/' + nx.n + ')' : '') : 'All rules broken. Keep wrecking!'; }
-  ctx.font = 'bold 40px Arial, sans-serif'; ctx.textAlign = 'center';
+    line = (player.cling ? 'CLAWS IN' : TOOL_LABEL[tool]) + '  ·  ' + (nx ? 'NEXT: ' + nx.text + (nx.n > 1 ? ' (' + (nx.count || 0) + '/' + nx.n + ')' : '') : 'All rules broken!'); }
+  ctx.font = 'bold ' + (line.length > 44 ? 32 : 40) + 'px Arial, sans-serif'; ctx.textAlign = 'center';
   var tw = Math.min(w - 20, ctx.measureText(line).width + 60);
   rrect(ctx, (w - tw) / 2, 140, tw, 66, 20); ctx.fillStyle = toastT > 0 ? 'rgba(255,155,61,0.9)' : 'rgba(24,16,38,0.6)'; ctx.fill();
   ctx.fillStyle = toastT > 0 ? '#2a1338' : '#e8defa'; ctx.fillText(line, w / 2, 174);
@@ -933,7 +966,7 @@ function drawEnd() {
   rrect(ctx, 8, 8, w - 16, h - 16, 40); ctx.fillStyle = 'rgba(24,16,38,0.92)'; ctx.fill();
   ctx.lineWidth = 8; ctx.strokeStyle = '#ff9b3d'; ctx.stroke();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ffb35c'; ctx.font = 'bold 72px Arial, sans-serif'; ctx.fillText('THE HUMAN IS HOME', w / 2, 100);
+  ctx.fillStyle = '#ffb35c'; ctx.font = 'bold 62px Arial, sans-serif'; ctx.fillText('THE HUMAN HAS HAD ENOUGH', w / 2, 100);
   ctx.fillStyle = '#ffffff'; ctx.font = 'bold 110px Arial, sans-serif'; ctx.fillText(String(score), w / 2, 240);
   var done = MISSIONS.filter(function (m) { return m.done; }).length;
   ctx.font = '42px Arial, sans-serif'; ctx.fillStyle = '#d9cdef'; ctx.fillText('rules broken: ' + done + ' / ' + MISSIONS.length, w / 2, 340);
@@ -946,15 +979,15 @@ function drawBoard() {
   var ctx = boardCanvas.getContext('2d'), w = 1024, h = 720;
   ctx.fillStyle = '#fffbe8'; ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = 'rgba(120,180,255,0.25)';
-  for (var y = 150; y < h; y += 62) ctx.fillRect(0, y + 40, w, 3);
+  for (var y = 128; y < h - 40; y += 49) ctx.fillRect(0, y + 44, w, 3);
   ctx.fillStyle = 'rgba(255,220,120,0.8)'; ctx.fillRect(w / 2 - 110, 0, 220, 36);
   ctx.fillStyle = '#2b2b5a'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  ctx.font = 'bold 64px "Comic Sans MS", "Chalkboard SE", Arial, sans-serif';
-  ctx.fillText('Dear Cat, please DON\'T:', 50, 92);
-  ctx.font = '42px "Comic Sans MS", "Chalkboard SE", Arial, sans-serif';
+  ctx.font = 'bold 58px "Comic Sans MS", "Chalkboard SE", Arial, sans-serif';
+  ctx.fillText('Dear Cat, please DON\'T:', 50, 80);
+  ctx.font = '36px "Comic Sans MS", "Chalkboard SE", Arial, sans-serif';
   MISSIONS.forEach(function (m, i) {
-    var yy = 172 + i * 62;
-    ctx.strokeStyle = '#2b2b5a'; ctx.lineWidth = 4; ctx.strokeRect(54, yy - 20, 40, 40);
+    var yy = 150 + i * 49;
+    ctx.strokeStyle = '#2b2b5a'; ctx.lineWidth = 4; ctx.strokeRect(58, yy - 16, 32, 32);
     ctx.fillStyle = m.done ? '#9a93b5' : '#2b2b5a';
     ctx.fillText(m.text + (m.n > 1 && !m.done ? '  (' + (m.count || 0) + '/' + m.n + ')' : ''), 116, yy);
     if (m.done) {
@@ -965,7 +998,7 @@ function drawBoard() {
     }
   });
   ctx.fillStyle = '#2b2b5a'; ctx.font = 'italic 34px "Comic Sans MS", Arial, sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('love, The Human (back soon!)', w - 40, h - 26);
+  ctx.fillText("love, The Human (I'm watching you)", w - 40, h - 22);
   boardTex.needsUpdate = true;
 }
 
@@ -978,6 +1011,15 @@ var leg = mesh(new THREE.CylinderGeometry(0.03, 0.034, 0.3, 8), fur, 0, 0, -0.15
   var t = mesh(new THREE.SphereGeometry(0.014, 6, 5), fur, o[0], 0.004, o[1]); paw.add(t);
   var bb = mesh(new THREE.SphereGeometry(0.008, 5, 4), bean, o[0], -0.01, o[1] + 0.004); paw.add(bb);
 });
+var taserModel = new THREE.Group();
+taserModel.add(mesh(new THREE.BoxGeometry(0.034, 0.03, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd23f }), 0, 0.035, 0.035));
+taserModel.add(mesh(new THREE.BoxGeometry(0.036, 0.032, 0.016), new THREE.MeshLambertMaterial({ color: 0x111111 }), 0, 0.035, 0.085));
+taserModel.add(mesh(new THREE.BoxGeometry(0.012, 0.004, 0.05), new THREE.MeshBasicMaterial({ color: 0x3dd6ff }), 0, 0.052, 0.03));
+var shaverModel = new THREE.Group();
+var shBody = mesh(new THREE.CylinderGeometry(0.022, 0.027, 0.11, 10), new THREE.MeshLambertMaterial({ color: 0x4a5568 }), 0, 0.04, 0.03); shBody.rotation.x = Math.PI / 2; shaverModel.add(shBody);
+shaverModel.add(mesh(new THREE.BoxGeometry(0.056, 0.02, 0.026), new THREE.MeshLambertMaterial({ color: 0xd9dee5 }), 0, 0.04, 0.095));
+shaverModel.add(mesh(new THREE.BoxGeometry(0.05, 0.004, 0.028), new THREE.MeshBasicMaterial({ color: 0x222222 }), 0, 0.052, 0.095));
+paw.add(taserModel); paw.add(shaverModel);
 scene.add(paw);
 var laserGeo = new THREE.BufferGeometry(); laserGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
 var laser = new THREE.Line(laserGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 }));
@@ -990,6 +1032,7 @@ controllers.forEach(function (c) {
   c.addEventListener('connected', function (e) { c.userData.src = e.data; if (!activeCtrl) activeCtrl = c; });
   c.addEventListener('disconnected', function () { c.userData.src = null; if (activeCtrl === c) activeCtrl = null; });
   c.addEventListener('selectstart', function () { activeCtrl = c; onAction(); });
+  c.addEventListener('selectend', function () { onActionEnd(); });
 });
 
 var aimOrigin = new V3(), aimDir = new V3(0, 0, -1), _tmp = new V3(), _tmp2 = new V3(), _cq = new THREE.Quaternion();
@@ -1047,15 +1090,26 @@ function swipe() {
   }
   if (hits) sfx('bat');
 }
+var _pawEye = new V3(), _pawR = new V3(), _pawU = new V3(), _pawF = new V3(), _pawD = new V3(), pawRoll = 0;
+var PAW_FLIP = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), Math.PI);
 function updatePaw(dt, inVR) {
   swipeCD = Math.max(0, swipeCD - dt);
   pawExt = Math.max(0, pawExt - dt * 4.5);
   var ext = Math.sin(Math.min(1, pawExt) * Math.PI);
-  var dist = (inVR ? 0.3 : 0.24) + ext * 0.45;
-  paw.position.copy(aimOrigin).addScaledVector(aimDir, dist);
-  if (!inVR) paw.position.y -= 0.06 * (1 - ext);
-  _tmp.copy(paw.position).add(aimDir);
-  paw.lookAt(_tmp);
+  var reach = ext * 0.45 + (shaving ? 0.12 : 0);
+  camera.getWorldPosition(_pawEye);
+  if (inVR) {
+    // held on your right side like the gun in GO RANGE, and it twists/rotates with the controller
+    _pawR.set(-aimDir.z, 0, aimDir.x); if (_pawR.lengthSq() < 1e-4) _pawR.set(1, 0, 0); _pawR.normalize();
+    paw.position.copy(_pawEye).add(_pawD.set(0, -0.17, 0)).addScaledVector(_pawR, 0.12).addScaledVector(aimDir, 0.42 + reach);
+    if (activeCtrl && activeCtrl.userData.src) { activeCtrl.getWorldQuaternion(_cq); paw.quaternion.copy(_cq).multiply(PAW_FLIP); }
+    else { _tmp.copy(paw.position).add(aimDir); paw.lookAt(_tmp); }
+  } else {
+    camera.matrixWorld.extractBasis(_pawR, _pawU, _pawF); _pawF.negate();
+    paw.position.copy(_pawEye).addScaledVector(_pawR, 0.14).addScaledVector(_pawU, -0.1).addScaledVector(_pawF, 0.2).addScaledVector(aimDir, 0.28 + reach);
+    _tmp.copy(_pawEye).addScaledVector(aimDir, 3); paw.lookAt(_tmp);
+    paw.rotateZ(pawRoll);
+  }
   laser.visible = inVR && state === 'play';
   if (laser.visible) {
     var a = laserGeo.attributes.position.array;
@@ -1063,7 +1117,10 @@ function updatePaw(dt, inVR) {
     a[3] = aimOrigin.x + aimDir.x * REACH; a[4] = aimOrigin.y + aimDir.y * REACH; a[5] = aimOrigin.z + aimDir.z * REACH;
     laserGeo.attributes.position.needsUpdate = true;
   }
-  var t = state === 'play' ? findTarget() : null;
+  taserModel.visible = tool === 'taser'; shaverModel.visible = tool === 'shaver';
+  if (shaving) shaverModel.position.set(rand(-0.003, 0.003), rand(-0.003, 0.003), 0); else shaverModel.position.set(0, 0, 0);
+  laser.material.color.setHex(tool === 'taser' ? 0x8fe8ff : (tool === 'shaver' ? 0xc8ffb0 : 0xffffff));
+  var t = state === 'play' && tool === 'paw' ? findTarget() : null;
   if (t !== target) {
     if (target && target.alive) target.mats.forEach(function (m) { if (m.emissive && m.userData.e0) m.emissive.copy(m.userData.e0); });
     target = t;
@@ -1072,6 +1129,456 @@ function updatePaw(dt, inVR) {
       if (!m.userData.e0) m.userData.e0 = m.emissive.clone();
       m.emissive.setRGB(0.28, 0.24, 0.12);
     });
+  }
+}
+
+// ================= MESH MERGER (used to build the human cheaply) =================
+var _mm4 = new THREE.Matrix4(), _mq = new THREE.Quaternion(), _me = new THREE.Euler(), _ms = new V3(), _mp = new V3(), UPV = new V3(0, 1, 0);
+function Merger() { this.list = []; }
+Merger.prototype.addMatrix = function (geo, color, m) {
+  var g = geo.index ? geo.toNonIndexed() : geo.clone(); g.applyMatrix4(m);
+  var n = g.attributes.position.count, col = new Float32Array(n * 3), c = new THREE.Color(color);
+  for (var i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3)); this.list.push(g); return this;
+};
+Merger.prototype.add = function (geo, color, x, y, z, rx, ry, rz, sx, sy, sz) {
+  _me.set(rx || 0, ry || 0, rz || 0); _mq.setFromEuler(_me); _mp.set(x || 0, y || 0, z || 0); _ms.set(sx || 1, sy || 1, sz || 1);
+  _mm4.compose(_mp, _mq, _ms); return this.addMatrix(geo, color, _mm4);
+};
+Merger.prototype.box = function (x0, y0, z0, x1, y1, z1, color) {
+  return this.add(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), color, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+};
+Merger.prototype.limb = function (a, b, r1, r2, color, seg) {
+  var d = new V3().subVectors(b, a), len = d.length(), g = new THREE.CylinderGeometry(r2, r1, len, seg || 8);
+  _mq.setFromUnitVectors(UPV, d.normalize()); _mp.copy(a).add(b).multiplyScalar(0.5); _ms.set(1, 1, 1);
+  _mm4.compose(_mp, _mq, _ms); return this.addMatrix(g, color, _mm4);
+};
+Merger.prototype.build = function (mat) {
+  var total = 0, off = 0; this.list.forEach(function (g) { total += g.attributes.position.count; });
+  var pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  this.list.forEach(function (g) {
+    pos.set(g.attributes.position.array, off * 3); nor.set(g.attributes.normal.array, off * 3); col.set(g.attributes.color.array, off * 3);
+    off += g.attributes.position.count; g.dispose();
+  });
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeBoundingSphere();
+  this.list = []; return new THREE.Mesh(geo, mat);
+};
+var MAT_VC = new THREE.MeshLambertMaterial({ vertexColors: true });
+var SPH = new THREE.SphereGeometry(1, 12, 10);
+
+// ================= THE HUMAN =================
+var HUMAN_HAIR = 0x5a3a22;
+function buildHuman() {
+  var skin = 0xe8b896, skinDark = 0xd29f7a, shirt = 0x3a86ff, pants = 0x2b2d42, shoe = 0x1f1f1f;
+  var H = { g: new THREE.Group(), x: 0, z: 0.9, ang: 0, speed: 0, path: [], act: null, actT: 0, mode: 'walk', t: 0, talkT: 0, blinkT: 2,
+    reactT: 0, reactCD: 0, zap: 0, spiky: 0, look: null, sit: 0, sitTarget: 0, dx: 0, dz: 0, clumps: [], shaved: 0, headCD: 0, saidShaver: false };
+  H.hips = new THREE.Group(); H.hips.position.y = 0.92; H.g.add(H.hips);
+  var T = new Merger();
+  T.add(new THREE.CylinderGeometry(0.19, 0.165, 0.56, 14), shirt, 0, 0.3, 0, 0, 0, 0, 1, 1, 0.62);
+  T.add(SPH, shirt, 0.19, 0.55, 0, 0, 0, 0, 0.085, 0.08, 0.08);
+  T.add(SPH, shirt, -0.19, 0.55, 0, 0, 0, 0, 0.085, 0.08, 0.08);
+  T.add(new THREE.CylinderGeometry(0.05, 0.056, 0.13, 10), skin, 0, 0.64, 0);
+  T.add(new THREE.CylinderGeometry(0.175, 0.17, 0.12, 14), pants, 0, 0.02, 0, 0, 0, 0, 1, 1, 0.66);
+  T.box(-0.172, 0.07, -0.118, 0.172, 0.1, 0.118, 0x3b2a1a);
+  H.hips.add(T.build(MAT_VC));
+  function leg(side) {
+    var hip = new THREE.Group(); hip.position.set(side * 0.09, 0, 0); H.hips.add(hip);
+    hip.add(new Merger().limb(new V3(0, 0, 0), new V3(0, -0.44, 0), 0.075, 0.06, pants, 10).build(MAT_VC));
+    var knee = new THREE.Group(); knee.position.y = -0.44; hip.add(knee);
+    knee.add(new Merger().limb(new V3(0, 0, 0), new V3(0, -0.42, 0), 0.058, 0.045, pants, 10).box(-0.05, -0.49, -0.05, 0.05, -0.41, 0.14, shoe).build(MAT_VC));
+    return { hip: hip, knee: knee };
+  }
+  function arm(side) {
+    var sh = new THREE.Group(); sh.position.set(side * 0.215, 0.54, 0); H.hips.add(sh);
+    sh.add(new Merger().limb(new V3(0, 0, 0), new V3(0, -0.29, 0), 0.052, 0.045, shirt, 10).build(MAT_VC));
+    var el = new THREE.Group(); el.position.y = -0.29; sh.add(el);
+    el.add(new Merger().limb(new V3(0, 0, 0), new V3(0, -0.25, 0), 0.04, 0.034, skin, 10).add(SPH, skin, 0, -0.29, 0.005, 0, 0, 0, 0.042, 0.05, 0.03).build(MAT_VC));
+    return { sh: sh, el: el };
+  }
+  H.legL = leg(1); H.legR = leg(-1); H.armL = arm(1); H.armR = arm(-1);
+  H.phone = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.14, 0.012), new THREE.MeshLambertMaterial({ color: 0x111111, emissive: 0x223355 }));
+  H.phone.position.set(0, -0.31, 0.03); H.phone.visible = false; H.armR.el.add(H.phone);
+  H.head = new THREE.Group(); H.head.position.set(0, 0.78, 0); H.hips.add(H.head);
+  var D = new Merger();
+  D.add(SPH, skin, 0, 0, 0, 0, 0, 0, 0.092, 0.108, 0.098);
+  D.add(SPH, skin, 0, -0.055, 0.02, 0, 0, 0, 0.074, 0.064, 0.075);
+  D.add(SPH, skin, 0.09, 0, -0.005, 0, 0, 0, 0.012, 0.026, 0.02); D.add(SPH, skin, -0.09, 0, -0.005, 0, 0, 0, 0.012, 0.026, 0.02);
+  D.add(SPH, skinDark, 0, -0.012, 0.098, 0, 0, 0, 0.016, 0.024, 0.022);
+  [-1, 1].forEach(function (sd) {
+    D.add(SPH, 0xffffff, sd * 0.034, 0.018, 0.082, 0, 0, 0, 0.017, 0.014, 0.012);
+    D.add(SPH, 0x3f6f4f, sd * 0.034, 0.018, 0.093, 0, 0, 0, 0.0095, 0.0095, 0.004);
+    D.add(SPH, 0x111111, sd * 0.034, 0.018, 0.0965, 0, 0, 0, 0.005, 0.005, 0.002);
+    D.add(new THREE.BoxGeometry(0.036, 0.009, 0.012), HUMAN_HAIR, sd * 0.035, 0.045, 0.091, 0, 0, -sd * 0.1);
+  });
+  D.add(SPH, new THREE.Color(skin).lerp(new THREE.Color(HUMAN_HAIR), 0.35).getHex(), 0, -0.058, 0.024, 0, 0, 0, 0.077, 0.064, 0.074);
+  H.head.add(D.build(MAT_VC));
+  H.mouth = new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.009, 0.012), new THREE.MeshLambertMaterial({ color: 0x8a3b3b }));
+  H.mouth.position.set(0, -0.054, 0.097); H.head.add(H.mouth);
+  var L = new Merger(); L.add(SPH, skin, -0.034, 0, 0.083, 0, 0, 0, 0.0185, 0.016, 0.0135); L.add(SPH, skin, 0.034, 0, 0.083, 0, 0, 0, 0.0185, 0.016, 0.0135);
+  H.lids = L.build(MAT_VC); H.lids.position.y = 0.018; H.lids.scale.y = 0.05; H.head.add(H.lids);
+  // hair = separate clumps so the shaver can take them off one by one
+  H.hairMat = new THREE.MeshLambertMaterial({ color: HUMAN_HAIR });
+  [[0, 0.088, 0.0], [0.05, 0.078, 0.035], [-0.05, 0.078, 0.035], [0.072, 0.05, -0.03], [-0.072, 0.05, -0.03], [0, 0.072, -0.06],
+   [0.042, 0.03, -0.085], [-0.042, 0.03, -0.085], [0.0, 0.085, 0.058], [0.078, 0.0, -0.05], [-0.078, 0.0, -0.05], [0, -0.01, -0.095]].forEach(function (c) {
+    var m = new THREE.Mesh(SPH, H.hairMat); m.position.set(c[0], c[1], c[2]); m.scale.set(0.056, 0.046, 0.056);
+    m.userData.base = m.position.clone(); H.head.add(m); H.clumps.push(m);
+  });
+  scene.add(H.g);
+  return H;
+}
+var human = buildHuman();
+human.box = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 1.82, maxZ: 0, mover: true, human: true, dx: 0, dz: 0 };
+human.lap = { minX: 0, minY: -5, minZ: 0, maxX: 0, maxY: -5, maxZ: 0, mover: true, human: true, dx: 0, dz: 0 };
+solids.push(human.box, human.lap);
+
+// walking routes between spots in the house (so the human doesn't walk through tables)
+var NAV = { A: [0, 0.9], B: [-1.6, 0.9], C: [-1.9, -2.4], D: [0.3, -2.7], E: [1.9, -2.75], F: [3.9, -2.3], G: [4.1, 1.3], H: [1.2, 2.3],
+  I: [-3.8, 0.9], J: [-4.45, -0.6], K: [-4.2, -3.0], L: [-3.3, 2.2], M: [-2.4, 2.9] };
+var NAV_ADJ = {};
+Object.keys(NAV).forEach(function (k) { NAV_ADJ[k] = []; });
+['AB', 'AD', 'AH', 'HG', 'GF', 'FE', 'ED', 'DC', 'CK', 'CB', 'BI', 'IJ', 'BL', 'BM', 'LM'].forEach(function (e) { NAV_ADJ[e[0]].push(e[1]); NAV_ADJ[e[1]].push(e[0]); });
+var ACTS = [
+  { node: 'E', face: Math.PI, kind: 'tea', time: [7, 11], lines: ['Ahh, tea.', 'Where did I put the biscuits?'] },
+  { node: 'J', face: Math.PI / 2, kind: 'couch', time: [13, 19], lines: ['*scrolls phone*', 'Haha, cat videos.', 'Just five more minutes...'] },
+  { node: 'G', face: Math.PI / 2, kind: 'window', time: [6, 9], lines: ['Nice day out.', "Ooh a bird. Don't tell the cat."] },
+  { node: 'K', face: Math.PI, kind: 'books', time: [6, 9], lines: ['Hmm, what to read...'] },
+  { node: 'L', face: Math.atan2(-0.85, 1.0), kind: 'tree', time: [5, 8], lines: ["Beautiful tree. DON'T touch it, cat."] },
+  { node: 'M', face: 0, kind: 'tv', time: [6, 10], lines: ['Bird TV? Again?'] }
+];
+function nearestNode(x, z) {
+  var best = null, bd = 1e9;
+  Object.keys(NAV).forEach(function (k) { var d = (NAV[k][0] - x) * (NAV[k][0] - x) + (NAV[k][1] - z) * (NAV[k][1] - z); if (d < bd) { bd = d; best = k; } });
+  return best;
+}
+function navPath(x, z, goal) {
+  var start = nearestNode(x, z), prev = {}, q = [start], seen = {}; seen[start] = true;
+  while (q.length) { var n = q.shift(); if (n === goal) break; NAV_ADJ[n].forEach(function (m) { if (!seen[m]) { seen[m] = true; prev[m] = n; q.push(m); } }); }
+  var path = [], cur = goal; while (cur) { path.unshift(NAV[cur]); cur = prev[cur]; }
+  return path;
+}
+function startActivity(act) {
+  human.act = act; human.path = navPath(human.x, human.z, act.node); human.mode = 'walk';
+}
+function pickActivity() {
+  var opts = ACTS.filter(function (a) { return a !== human.act; });
+  startActivity(pick(opts));
+}
+function wrapAng(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+function turnTo(target, dt, rate) { human.ang += wrapAng(target - human.ang) * Math.min(1, dt * rate); }
+function resetHuman() {
+  human.x = 0.4; human.z = 1.0; human.ang = 0; human.speed = 0; human.zap = 0; human.spiky = 0; human.reactT = 0; human.reactCD = 0;
+  human.sit = 0; human.sitTarget = 0; human.look = null; human.shaved = 0; human.saidShaver = false; human.hatCat = false; human.lapCat = false;
+  human.clumps.forEach(function (c) { c.visible = true; c.position.copy(c.userData.base); c.scale.set(0.056, 0.046, 0.056); });
+  human.act = null; startActivity(ACTS[1]);
+}
+// speech bubble
+var hbCanvas = document.createElement('canvas'); hbCanvas.width = 512; hbCanvas.height = 150;
+var hbTex = new THREE.CanvasTexture(hbCanvas);
+var hBubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: hbTex, depthTest: false, transparent: true }));
+hBubble.scale.set(0.75, 0.22, 1); hBubble.renderOrder = 997; hBubble.visible = false; scene.add(hBubble);
+var hBubbleT = 0;
+function mumble(n, pitch) {
+  if (!actx) return; var t = actx.currentTime;
+  for (var i = 0; i < n; i++) { var f = pitch * rand(0.8, 1.25); tn(t + i * 0.075, 0.06, 'triangle', f, f * rand(0.85, 1.1), 0.08); }
+}
+function sayHuman(text) {
+  var c = hbCanvas.getContext('2d'); c.clearRect(0, 0, 512, 150);
+  c.font = 'bold ' + (text.length > 24 ? 30 : 38) + 'px Arial';
+  var tw = Math.min(490, c.measureText(text).width + 50);
+  c.fillStyle = '#fff'; rrect(c, (512 - tw) / 2, 6, tw, 100, 28); c.fill();
+  c.beginPath(); c.moveTo(220, 104); c.lineTo(256, 145); c.lineTo(268, 104); c.fill();
+  c.strokeStyle = '#2a1338'; c.lineWidth = 4; rrect(c, (512 - tw) / 2, 6, tw, 100, 28); c.stroke();
+  c.fillStyle = '#2a1338'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(text, 256, 57);
+  hbTex.needsUpdate = true; hBubble.visible = true; hBubbleT = 2.8;
+  human.talkT = Math.min(2, 0.3 + text.length * 0.05);
+  mumble(Math.min(12, 2 + Math.floor(text.length / 3)), 150);
+}
+resetHuman();
+function humanNotice(x, y, z, line) {
+  if (state !== 'play' || human.zap > 0 || human.reactCD > 0) return;
+  human.reactCD = 3.5; human.reactT = 2.2; human.look = new V3(x, y, z); sayHuman(line);
+}
+var _hq = new THREE.Quaternion(), _hq2 = new THREE.Quaternion(), _hv = new V3();
+function updateHuman(dt) {
+  var H = human, ox = H.x, oz = H.z;
+  H.t += dt; H.reactCD -= dt; H.headCD -= dt;
+  var actOK = state !== 'end';
+  if (H.zap > 0) {
+    H.zap -= dt; H.speed = 0;
+  } else if (H.reactT > 0) {
+    H.reactT -= dt; H.speed = 0;
+    if (H.look && H.sit < 0.3) turnTo(Math.atan2(H.look.x - H.x, H.look.z - H.z), dt, 5);
+    if (H.reactT <= 0) H.look = null;
+  } else if (H.mode === 'walk' && actOK) {
+    if (H.sit > 0.05) { H.sitTarget = 0; }
+    else if (!H.path.length) { H.mode = 'act'; H.actT = rand(H.act.time[0], H.act.time[1]); if (Math.random() < 0.6) sayHuman(pick(H.act.lines)); }
+    else {
+      var tgt = H.path[0], dx = tgt[0] - H.x, dz = tgt[1] - H.z, d = Math.sqrt(dx * dx + dz * dz);
+      if (d < 0.1) H.path.shift();
+      else {
+        turnTo(Math.atan2(dx, dz), dt, 6);
+        H.speed += (1.0 - H.speed) * Math.min(1, dt * 4);
+        var step = Math.min(d, H.speed * dt); H.x += dx / d * step; H.z += dz / d * step;
+      }
+    }
+  } else if (H.mode === 'act') {
+    H.speed = 0; H.actT -= dt;
+    turnTo(H.act.face, dt, 4);
+    H.sitTarget = H.act.kind === 'couch' && H.actT > 0 ? 1 : 0;
+    if (H.act.kind === 'couch') { H.x += (NAV.J[0] - H.x) * Math.min(1, dt * 3); H.z += (NAV.J[1] - H.z) * Math.min(1, dt * 3); }
+    if (H.actT <= 0 && actOK && H.sit < 0.1) pickActivity();
+  }
+  H.sit += (H.sitTarget - H.sit) * Math.min(1, dt * 3);
+  H.dx = H.x - ox; H.dz = H.z - oz;
+  // collision boxes for the cat (you can ride on their head... or sit on their lap)
+  var fx = Math.sin(H.ang), fz = Math.cos(H.ang);
+  H.box.minX = H.x - 0.2; H.box.maxX = H.x + 0.2; H.box.minZ = H.z - 0.2; H.box.maxZ = H.z + 0.2;
+  H.box.maxY = 1.82 - H.sit * 0.44; H.box.dx = H.dx; H.box.dz = H.dz;
+  if (H.sit > 0.8) {
+    var lx = H.x + fx * 0.32, lz = H.z + fz * 0.32;
+    H.lap.minX = lx - 0.17; H.lap.maxX = lx + 0.17; H.lap.minZ = lz - 0.17; H.lap.maxZ = lz + 0.17; H.lap.minY = 0; H.lap.maxY = 0.64;
+  } else { H.lap.minY = -5; H.lap.maxY = -5; }
+  H.g.position.set(H.x, 0, H.z); H.g.rotation.y = H.ang;
+  animHuman(H, dt);
+}
+function animHuman(H, dt) {
+  var walk = clamp(H.speed, 0, 1), ph = H.t * 7.5, sit = H.sit;
+  H.legL.hip.rotation.x = Math.sin(ph) * 0.55 * walk - sit * Math.PI / 2;
+  H.legR.hip.rotation.x = -Math.sin(ph) * 0.55 * walk - sit * Math.PI / 2;
+  H.legL.knee.rotation.x = Math.max(0, -Math.sin(ph)) * 0.8 * walk + sit * Math.PI / 2;
+  H.legR.knee.rotation.x = Math.max(0, Math.sin(ph)) * 0.8 * walk + sit * Math.PI / 2;
+  H.armL.sh.rotation.set(-Math.sin(ph) * 0.45 * walk, 0, 0.08); H.armR.sh.rotation.set(Math.sin(ph) * 0.45 * walk, 0, -0.08);
+  H.armL.el.rotation.x = -0.2 - 0.2 * walk; H.armR.el.rotation.x = -0.2 - 0.2 * walk;
+  H.phone.visible = false;
+  var kind = H.mode === 'act' && H.act ? H.act.kind : '';
+  if (kind === 'couch' && H.reactT <= 0) { H.armR.sh.rotation.x = -0.5; H.armR.el.rotation.x = -1.5; H.phone.visible = true; }
+  if (kind === 'tea' && H.reactT <= 0) { var sip = Math.max(0, Math.sin(H.t * 1.3)); H.armR.sh.rotation.x = -0.5 - sip * 0.5; H.armR.el.rotation.x = -1.4 - sip * 0.6; }
+  if (H.reactT > 0) { H.armR.sh.rotation.x = -1.2; H.armR.el.rotation.x = -0.6 + Math.sin(H.t * 14) * 0.25; }  // finger-wag
+  H.hips.position.set(0, 0.92 - sit * 0.42 + Math.abs(Math.sin(ph)) * 0.025 * walk, 0);
+  H.hips.rotation.x = -sit * 0.15;
+  if (H.zap > 0) {
+    H.hips.position.x = rand(-0.02, 0.02); H.hips.position.z = rand(-0.02, 0.02);
+    [H.armL.sh, H.armR.sh].forEach(function (a) { a.rotation.x = rand(-2.5, 0.3); a.rotation.z = rand(-1, 1); });
+    H.lids.scale.y = Math.random() < 0.5 ? 1 : 0.05; H.mouth.scale.y = 3.5;
+  } else {
+    H.blinkT -= dt;
+    if (H.blinkT < 0) { H.lids.scale.y = 1; if (H.blinkT < -0.12) H.blinkT = rand(1.5, 5); } else H.lids.scale.y = 0.05;
+    if (H.talkT > 0) { H.talkT -= dt; H.mouth.scale.y = 1 + 2.4 * Math.abs(Math.sin(H.t * 17)); } else H.mouth.scale.y = 1;
+  }
+  // electrified hair
+  if (H.spiky > 0) H.spiky -= dt;
+  var sp = clamp(H.spiky, 0, 1);
+  H.clumps.forEach(function (c) { c.scale.set(0.056 - sp * 0.02, 0.046 + sp * 0.07, 0.056 - sp * 0.02); c.position.copy(c.userData.base).multiplyScalar(1 + sp * 0.3); });
+  // head turns to look at things
+  _hq.copy(H.head.quaternion);
+  if (H.look) { H.head.lookAt(H.look); _hq2.copy(H.head.quaternion); } else _hq2.set(0, 0, 0, 1);
+  H.head.quaternion.copy(_hq).slerp(_hq2, Math.min(1, dt * 5));
+}
+
+// ================= CAT TOOLS: paw · taser · shaver =================
+var TOOLS = ['paw', 'taser', 'shaver'], TOOL_LABEL = { paw: 'PAW', taser: 'TASER', shaver: 'SHAVER' }, tool = 'paw';
+function setTool(t) { if (tool === t) return; if (shaving) stopShave(); tool = t; sfx('click'); showToast(TOOL_LABEL[t] + (t === 'paw' ? ' (swat!)' : t === 'taser' ? ' equipped. ZAP things.' : ' equipped. Hold trigger to shave.')); hudDirty = true; }
+function cycleTool() { setTool(TOOLS[(TOOLS.indexOf(tool) + 1) % TOOLS.length]); }
+function isUnder(o, root) { while (o) { if (o === root) return true; o = o.parent; } return false; }
+function propOf(o) { while (o) { if (o.userData && o.userData.prop) return o.userData.prop; o = o.parent; } return null; }
+
+// --- taser
+var WIRE_SEG = 10, zapCD = 0, wireT = 0, wireEnd = new V3(), tvGlitch = 0, zapRay = new THREE.Raycaster();
+var wireGeo = new THREE.BufferGeometry(); wireGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(2 * WIRE_SEG * 6), 3));
+var wires = new THREE.LineSegments(wireGeo, new THREE.LineBasicMaterial({ color: 0x8fe8ff, transparent: true }));
+wires.frustumCulled = false; wires.visible = false; scene.add(wires);
+function fireTaser() {
+  if (zapCD > 0) { sfx('click'); return; }
+  zapCD = 1.5; sfx('zap'); pawExt = 0.6;
+  zapRay.set(aimOrigin, aimDir); zapRay.far = 5;
+  var hits = zapRay.intersectObjects([human.g, vac.mesh, tvScreen, propRoot], true);
+  wireT = 0.7;
+  if (!hits.length) { wireEnd.copy(aimOrigin).addScaledVector(aimDir, 3.5); wireEnd.y = Math.max(0.02, wireEnd.y - 0.5); return; }
+  var h = hits[0]; wireEnd.copy(h.point);
+  spawnShards(h.point.x, h.point.y, h.point.z, 0x8fe8ff, 8, 0);
+  if (isUnder(h.object, human.g)) zapHuman();
+  else if (isUnder(h.object, vac.mesh)) { if (vac.haywire <= 0) { showToast('The robo-vac has gone ROGUE!'); addScore(100, 'ROGUE VAC', vac.x, 0.3, vac.z, '#8fe8ff'); } vac.haywire = 6; }
+  else if (h.object === tvScreen) { tvGlitch = 3; addScore(50, 'TV FRIED', h.point.x, h.point.y, h.point.z, '#8fe8ff'); humanNotice(h.point.x, h.point.y, h.point.z, 'My TV!'); }
+  else { var p = propOf(h.object); if (p && p.alive) { unpin(p); p.vy = 2.6; p.vx += aimDir.x * 1.5; p.vz += aimDir.z * 1.5; p.grounded = false; p.spin.set(rand(-12, 12), 0, rand(-12, 12)); } }
+}
+function taserHasTarget() {
+  zapRay.set(aimOrigin, aimDir); zapRay.far = 5;
+  return zapRay.intersectObjects([human.g, vac.mesh, tvScreen, propRoot], true).length > 0;
+}
+function zapHuman() {
+  if (human.zap > 0) return;
+  human.zap = 1.6; human.spiky = 7; human.reactT = 0; sayHuman('BZZZZZZT!!');
+  progress('zap'); addScore(250, 'ZAP!', human.x, 2.0, human.z, '#8fe8ff');
+  setTimeout(function () {
+    if (state !== 'play') return;
+    human.reactCD = 0; humanNotice(player.x, player.y + 0.2, player.z, pick(['Did the CAT just taser me?!', 'Where did you even GET that?!', 'My hair feels... crunchy.']));
+  }, 1700);
+}
+function updateWires(dt) {
+  zapCD = Math.max(0, zapCD - dt);
+  if (wireT <= 0) { wires.visible = false; return; }
+  wireT -= dt; wires.visible = true; wires.material.opacity = Math.min(1, wireT / 0.3);
+  var a = wireGeo.attributes.position.array, idx = 0, sx = paw.position.x, sy = paw.position.y, sz = paw.position.z;
+  for (var w = 0; w < 2; w++) {
+    var off = w ? 0.01 : -0.01, px = sx, py = sy + off, pz = sz;
+    for (var s = 1; s <= WIRE_SEG; s++) {
+      var u = s / WIRE_SEG, j = s === WIRE_SEG ? 0 : 0.025;
+      var nx = sx + (wireEnd.x - sx) * u + rand(-j, j), ny = sy + off * (1 - u) + (wireEnd.y - sy) * u + rand(-j, j), nzz = sz + (wireEnd.z - sz) * u + rand(-j, j);
+      a[idx++] = px; a[idx++] = py; a[idx++] = pz; a[idx++] = nx; a[idx++] = ny; a[idx++] = nzz; px = nx; py = ny; pz = nzz;
+    }
+  }
+  wireGeo.attributes.position.needsUpdate = true;
+}
+
+// --- shaver
+var shaving = false, shaveTick = 0, buzzNode = null, rugDirty = false, _tip = new V3(), _cw = new V3();
+function startShave() {
+  shaving = true;
+  if (!actx || buzzNode) return;
+  var o = actx.createOscillator(), f = actx.createBiquadFilter(), g = actx.createGain();
+  o.type = 'sawtooth'; o.frequency.value = 125; f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8; g.gain.value = 0.1;
+  o.connect(f); f.connect(g); g.connect(master); o.start(); buzzNode = { o: o, g: g };
+}
+function stopShave() {
+  shaving = false;
+  if (buzzNode) { try { buzzNode.g.gain.setTargetAtTime(0, actx.currentTime, 0.03); buzzNode.o.stop(actx.currentTime + 0.2); } catch (e) {} buzzNode = null; }
+}
+function shaveRug(x, z) {
+  var c = rugCanvas.getContext('2d');
+  var px = ((x - RUG.x) / (2 * RUG.r) + 0.5) * 256, py = ((z - RUG.z) / (2 * RUG.r) + 0.5) * 256;
+  c.fillStyle = '#efe0c8'; c.beginPath(); c.arc(px, py, 9, 0, 7); c.fill();
+  rugDirty = true;
+}
+function updateShave(dt) {
+  if (!shaving) return;
+  if (tool !== 'shaver' || state !== 'play') { stopShave(); return; }
+  _tip.copy(paw.position).addScaledVector(aimDir, 0.07);
+  var bite = false;
+  // the human's hair!
+  human.clumps.forEach(function (c) {
+    if (!c.visible) return;
+    c.getWorldPosition(_cw);
+    if (_cw.distanceTo(_tip) < 0.2) {
+      c.visible = false; human.shaved++; bite = true;
+      spawnShards(_cw.x, _cw.y, _cw.z, HUMAN_HAIR, 10, 0);
+      addScore(40, 'SHAVE', _cw.x, _cw.y, _cw.z, '#c8ffb0'); progress('haircut');
+      if (!human.saidShaver) { human.saidShaver = true; human.reactCD = 0; humanNotice(player.x, player.y + 0.2, player.z, 'Is that... MY SHAVER?!'); }
+      else if (human.shaved === human.clumps.length) { human.reactCD = 0; humanNotice(player.x, player.y + 0.2, player.z, 'MY HAIR!!! NOOOO!'); }
+    }
+  });
+  shaveTick -= dt;
+  if (shaveTick <= 0) {
+    shaveTick = 0.15;
+    props.forEach(function (p) {
+      if (!p.alive || p.type !== 'pillow') return;
+      if (Math.abs(p.x - _tip.x) < 0.25 && Math.abs(p.z - _tip.z) < 0.25 && Math.abs(p.y - _tip.y) < 0.25) {
+        bite = true; spawnShards(p.x, p.y + 0.05, p.z, 0xffffff, 4, Math.max(0, p.y - p.hh));
+        var sc = Math.max(0.45, p.obj.scale.x * 0.93); p.obj.scale.set(sc, sc, sc); addScore(10, 'FLUFF', p.x, p.y, p.z, '#ffffff');
+      }
+    });
+    var rx = _tip.x - RUG.x, rz = _tip.z - RUG.z;
+    if (_tip.y < 0.16 && rx * rx + rz * rz < RUG.r * RUG.r) { shaveRug(_tip.x, _tip.z); bite = true; spawnShards(_tip.x, 0.03, _tip.z, 0xc2735a, 2, 0); addScore(5, '', _tip.x, 0.1, _tip.z, '#c8ffb0'); }
+    var ty = _tip.y, tr = treeR(ty), tdx = _tip.x - TREE.x, tdz = _tip.z - TREE.z;
+    if (ty > 0.3 && ty < 2.0 && Math.sqrt(tdx * tdx + tdz * tdz) < tr + 0.08) { bite = true; spawnShards(_tip.x, _tip.y, _tip.z, 0x2f8a4c, 4, 0); addScore(5, '', _tip.x, _tip.y, _tip.z, '#c8ffb0'); }
+  }
+  if (buzzNode) buzzNode.o.frequency.value = bite ? 92 : 125;
+}
+
+// --- claws: grab walls / tall furniture and climb
+var scratchTex = (function () {
+  var c = document.createElement('canvas'); c.width = c.height = 128; var x = c.getContext('2d');
+  x.strokeStyle = 'rgba(70,40,20,0.75)'; x.lineWidth = 7; x.lineCap = 'round';
+  for (var i = 0; i < 4; i++) { x.beginPath(); x.moveTo(22 + i * 24, 18); x.quadraticCurveTo(30 + i * 24, 64, 26 + i * 24, 112); x.stroke(); }
+  return new THREE.CanvasTexture(c);
+})();
+var scratches = [], scratchIdx = 0;
+for (var sci = 0; sci < 24; sci++) {
+  var sm = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.14), new THREE.MeshBasicMaterial({ map: scratchTex, transparent: true, depthWrite: false }));
+  sm.visible = false; scene.add(sm); scratches.push(sm);
+}
+function addScratch() {
+  var c = player.cling; if (!c) return;
+  var m = scratches[scratchIdx]; scratchIdx = (scratchIdx + 1) % scratches.length;
+  var gap = CAT_R + 0.02 - 0.006;
+  m.position.set(player.x - c.n.x * gap, player.y + CAT_H * 0.55, player.z - c.n.z * gap);
+  _tmp.set(m.position.x + c.n.x, m.position.y, m.position.z + c.n.z); m.lookAt(_tmp);
+  m.rotation.z += rand(-0.3, 0.3); m.visible = true;
+  sfx('claw'); c.lastY = player.y;
+}
+var clingTipShown = false;
+function tryCling() {
+  var ax = aimDir.x, az = aimDir.z, al = Math.sqrt(ax * ax + az * az);
+  if (al < 0.25) return false;
+  ax /= al; az /= al;
+  var best = null, bestD = CAT_R + 0.35;
+  function consider(nx, nz, d, box) { if (d < bestD && -(ax * nx + az * nz) > 0.5) { bestD = d; best = { n: { x: nx, z: nz }, box: box, d: d }; } }
+  consider(1, 0, player.x - ROOM.minX, null); consider(-1, 0, ROOM.maxX - player.x, null);
+  consider(0, 1, player.z - ROOM.minZ, null); consider(0, -1, ROOM.maxZ - player.z, null);
+  solids.forEach(function (b) {
+    if (b.mover || b.maxY < player.y + CAT_H + 0.15 || b.minY > player.y + 0.2) return;
+    var cx = clamp(player.x, b.minX, b.maxX), cz = clamp(player.z, b.minZ, b.maxZ), dx = player.x - cx, dz = player.z - cz, d = Math.sqrt(dx * dx + dz * dz);
+    if (d < 1e-4) return;
+    consider(dx / d, dz / d, d, b);
+  });
+  if (!best) return false;
+  player.cling = best; player.vx = player.vz = player.vy = 0; player.onGround = false; player.support = null;
+  var gap = CAT_R + 0.02 - best.d; player.x += best.n.x * gap; player.z += best.n.z * gap; player.y += 0.04;
+  addScratch(); hudDirty = true;
+  if (!clingTipShown) { clingTipShown = true; showToast('CLAWS IN! Push up/down to climb, jump to leap off.'); }
+  return true;
+}
+function releaseCling() { var c = player.cling; if (!c) return; player.cling = null; player.x += c.n.x * 0.04; player.z += c.n.z * 0.04; player.vy = 0; hudDirty = true; }
+function updateCling(dt, ix, iz, wantJump) {
+  var c = player.cling;
+  if (wantJump) { player.cling = null; player.vx = c.n.x * 2.8; player.vz = c.n.z * 2.8; player.vy = 4.2; player.onGround = false; sfx('mrrp'); hudDirty = true; return; }
+  var tx = -c.n.z, tz = c.n.x; if (tx * _right.x + tz * _right.z < 0) { tx = -tx; tz = -tz; }
+  var up = iz * 0.95, side = ix * 0.8;
+  player.y += up * dt; player.x += tx * side * dt; player.z += tz * side * dt;
+  if (Math.abs(player.y - (c.lastY || 0)) > 0.3) addScratch();
+  if (c.box) {
+    if (up > 0 && player.y + CAT_H * 0.4 >= c.box.maxY) {          // pull yourself up on top
+      player.y = c.box.maxY; player.x -= c.n.x * (CAT_R + 0.1); player.z -= c.n.z * (CAT_R + 0.1);
+      player.cling = null; player.onGround = true; player.vy = 0; player.support = c.box; sfx('mrrp'); hudDirty = true; return;
+    }
+    var cx = clamp(player.x, c.box.minX, c.box.maxX), cz = clamp(player.z, c.box.minZ, c.box.maxZ);
+    var dx = player.x - cx, dz = player.z - cz, d = Math.sqrt(dx * dx + dz * dz);
+    if (d > CAT_R + 0.12 || d < 1e-4) { player.cling = null; hudDirty = true; return; }  // slid off the edge
+    player.x = cx + dx / d * (CAT_R + 0.02); player.z = cz + dz / d * (CAT_R + 0.02);
+  } else {
+    if (c.n.x > 0.5) player.x = ROOM.minX + CAT_R + 0.02; if (c.n.x < -0.5) player.x = ROOM.maxX - CAT_R - 0.02;
+    if (c.n.z > 0.5) player.z = ROOM.minZ + CAT_R + 0.02; if (c.n.z < -0.5) player.z = ROOM.maxZ - CAT_R - 0.02;
+  }
+  player.x = clamp(player.x, ROOM.minX + CAT_R, ROOM.maxX - CAT_R); player.z = clamp(player.z, ROOM.minZ + CAT_R, ROOM.maxZ - CAT_R);
+  player.y = Math.min(player.y, ROOM.h - CAT_H - 0.03);
+  if (player.y > 2.0) progress('climb');
+  // climbed down onto something?
+  var ground = 0, gb = null;
+  for (var j = 0; j < solids.length; j++) { var s = solids[j]; if (s !== c.box && s.maxY > ground && s.maxY <= player.y + 0.02 && nearBox(player.x, player.z, s, CAT_R * 0.5)) { ground = s.maxY; gb = s; } }
+  if (player.y <= ground) { player.y = ground; if (up < 0) { player.cling = null; player.onGround = true; player.support = gb; hudDirty = true; } }
+}
+
+// --- the paw shoves whatever it touches (no trigger needed)
+var prevPaw = new V3(), pawVel = new V3(), pawInit = false;
+function pawPushProps(dt) {
+  if (!pawInit) { prevPaw.copy(paw.position); pawInit = true; }
+  pawVel.subVectors(paw.position, prevPaw).divideScalar(Math.max(dt, 0.001)); prevPaw.copy(paw.position);
+  if (pawVel.length() > 6) pawVel.setLength(6);
+  if (state !== 'play') return;
+  var PR = 0.07;
+  for (var i = 0; i < props.length; i++) {
+    var p = props[i]; if (!p.alive) continue;
+    if (Math.abs(p.y - paw.position.y) > p.hh + PR + 0.03) continue;
+    var dx = p.x - paw.position.x, dz = p.z - paw.position.z, rr = p.r + PR, d2 = dx * dx + dz * dz;
+    if (d2 >= rr * rr) continue;
+    var d = Math.sqrt(d2), nx, nz;
+    if (d < 1e-4) { nx = aimDir.x; nz = aimDir.z; var l = Math.sqrt(nx * nx + nz * nz) || 1; nx /= l; nz /= l; d = 0; } else { nx = dx / d; nz = dz / d; }
+    unpin(p);
+    var heavy = p.mass > 2 ? 0.35 : 1;
+    p.x += nx * (rr - d) * heavy; p.z += nz * (rr - d) * heavy;
+    var target = (Math.max(0, pawVel.x * nx + pawVel.z * nz) + 0.35) * heavy, vn = p.vx * nx + p.vz * nz;
+    if (vn < target) { p.vx += nx * (target - vn); p.vz += nz * (target - vn); }
   }
 }
 
@@ -1085,9 +1592,16 @@ window.addEventListener('keydown', function (e) {
   if (e.code === 'Space') { jumpQueued = true; e.preventDefault(); }
   if (e.code === 'KeyM') { initAudio(); sfx('meow'); }
   if (e.code === 'KeyR' && state !== 'menu') resetGame();
-  if (e.code === 'KeyE' || e.code === 'KeyF') onAction();
+  if ((e.code === 'KeyE' || e.code === 'KeyF') && !e.repeat) onAction();
+  if (e.code === 'KeyQ' && state === 'play') cycleTool();
+  if (e.code === 'KeyZ') pawRoll = Math.max(-1.6, pawRoll - 0.4);
+  if (e.code === 'KeyC') pawRoll = Math.min(1.6, pawRoll + 0.4);
+  if (state === 'play' && e.code === 'Digit1') setTool('paw');
+  if (state === 'play' && e.code === 'Digit2') setTool('taser');
+  if (state === 'play' && e.code === 'Digit3') setTool('shaver');
 });
-window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+window.addEventListener('keyup', function (e) { keys[e.code] = false; if (e.code === 'KeyE' || e.code === 'KeyF') onActionEnd(); });
+canvasEl.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 window.addEventListener('blur', function () { keys = {}; });
 
 function lockPointer() {
@@ -1111,7 +1625,9 @@ document.addEventListener('mousemove', function (e) {
   }
 });
 canvasEl.addEventListener('mousedown', function (e) {
-  if (state === 'menu' || renderer.xr.isPresenting || e.button !== 0) return;
+  if (state === 'menu' || renderer.xr.isPresenting) return;
+  if (e.button === 2) { if (state === 'play' && (locked || dragLook)) cycleTool(); return; }
+  if (e.button !== 0) return;
   if (locked) { onAction(); return; }
   if (dragLook) { dragging = true; dragMoved = 0; return; }
   if (!paused) lockPointer();
@@ -1119,13 +1635,20 @@ canvasEl.addEventListener('mousedown', function (e) {
 window.addEventListener('mouseup', function () {
   if (dragLook && dragging && dragMoved < 6) onAction();
   dragging = false;
+  onActionEnd();
 });
 
 function onAction() {
   initAudio();
   if (state === 'end') { if (endT > 1.2) resetGame(); return; }
-  if (state === 'play' && !paused) swipe();
+  if (state !== 'play' || paused) return;
+  if (player.cling) { releaseCling(); return; }
+  if (renderer.xr.isPresenting && aimDir.y < -0.93) { cycleTool(); return; }   // point at your own feet = switch tool
+  if (tool === 'paw') { if (target) swipe(); else if (!tryCling()) swipe(); }
+  else if (tool === 'taser') { if (taserHasTarget()) fireTaser(); else if (!tryCling()) fireTaser(); }
+  else { if (aimDir.y < -0.2 || !tryCling()) startShave(); }
 }
+function onActionEnd() { if (shaving) stopShave(); }
 
 var xrPrevBtn = false;
 function readXR() {
@@ -1156,8 +1679,10 @@ function resetGame() {
   MISSIONS.forEach(function (m) { m.done = false; m.count = 0; });
   score = 0; combo = 1; lastScoreT = -10; timeLeft = GAME_TIME; gameT = 0; rideT = 0; toastT = 0;
   player.x = 0; player.y = 0; player.z = 2.6; player.vx = player.vz = player.vy = 0; player.onGround = true; player.support = null;
-  yaw = 0; pitch = -0.1;
-  vac.x = 0.6; vac.z = 1.6; vac.ang = 0.4; vac.spinLeft = 0;
+  yaw = 0; pitch = -0.1; player.cling = null;
+  vac.x = 0.6; vac.z = 1.6; vac.ang = 0.4; vac.spinLeft = 0; vac.haywire = 0;
+  if (shaving) stopShave(); tool = 'paw'; resetHuman(); drawRug(); rugTex.needsUpdate = true;
+  scratches.forEach(function (m) { m.visible = false; });
   sh.forEach(function (s) { s.life = 0; });
   for (var i = 0; i < SHARDS; i++) { _sm.makeScale(0, 0, 0); shardMesh.setMatrixAt(i, _sm); }
   shardMesh.instanceMatrix.needsUpdate = true;
@@ -1170,7 +1695,8 @@ function startGame() {
   initAudio();
   menuEl.hidden = true;
   resetGame();
-  showToast('The human left. Time to cause CHAOS.');
+  showToast('The human is on their phone. Time to cause CHAOS.');
+  setTimeout(function () { if (state === 'play') sayHuman('Be GOOD, kitty. I mean it.'); }, 600);
 }
 function endGame() {
   state = 'end'; endT = 0;
@@ -1245,7 +1771,8 @@ renderer.setAnimationLoop(function () {
   if (running) {
     var playing = state === 'play';
     updateVac(dt);
-    updatePlayer(dt, playing ? wx : 0, playing ? wz : 0, playing && jump);
+    updateHuman(dt);
+    updatePlayer(dt, playing ? wx : 0, playing ? wz : 0, playing && jump, playing ? ix : 0, playing ? iz : 0);
     updateProps(dt);
     if (state !== 'menu') playerPushProps();
     propCollisions();
@@ -1265,6 +1792,20 @@ renderer.setAnimationLoop(function () {
 
   updateAim(inVR);
   updatePaw(dt, inVR);
+  pawPushProps(dt);
+  updateShave(dt);
+  updateWires(dt);
+  if (rugDirty) { rugTex.needsUpdate = true; rugDirty = false; }
+  if (tvGlitch > 0) { tvGlitch -= dt; tvScreen.material.color.setHSL(Math.random(), 0.8, Math.random() < 0.5 ? 0.2 : 0.9); if (tvGlitch <= 0) tvScreen.material.color.setHex(0xffffff); }
+  if (hBubbleT > 0) { hBubbleT -= dt; human.head.getWorldPosition(_hv); hBubble.position.set(_hv.x, _hv.y + 0.38, _hv.z); if (hBubbleT <= 0) hBubble.visible = false; }
+  if (state === 'play' && player.onGround && player.support === human.box && human.headCD <= 0) {
+    human.headCD = 6; human.reactCD = 0; humanNotice(player.x, player.y, player.z, pick(['Get OFF my head!', 'I am NOT a cat tree!', '...why.']));
+    if (!human.hatCat) { human.hatCat = true; addScore(200, 'CAT HAT', player.x, player.y + 0.4, player.z, '#ffd23f'); }
+  }
+  if (state === 'play' && player.onGround && player.support === human.lap && human.headCD <= 0) {
+    human.headCD = 6; human.reactCD = 0; humanNotice(player.x, player.y, player.z, pick(['Aww. Wait. What are you planning?', 'Hi kitty... suspicious.']));
+    if (!human.lapCat) { human.lapCat = true; addScore(100, 'LAP CAT', player.x, player.y + 0.4, player.z, '#ffd23f'); }
+  }
   paw.visible = state !== 'menu';
   hud.visible = state !== 'menu';
   hud.position.y = inVR ? 0.24 : 0.43;
@@ -1281,7 +1822,8 @@ renderer.setAnimationLoop(function () {
 
 // little debug hook for testing
 window.__chaos = { player: player, props: props, missions: MISSIONS, get state() { return state; }, get score() { return score; },
-  start: startGame, swipe: swipe, aim: function (y, p) { yaw = y; pitch = p; }, keys: keys, jump: function () { jumpQueued = true; } };
+  start: startGame, swipe: swipe, aim: function (y, p) { yaw = y; pitch = p; }, keys: keys, jump: function () { jumpQueued = true; },
+  human: human, tryCling: function () { return tryCling(); }, get target() { return target ? target.type : null; }, get aimDir() { return aimDir.toArray(); }, action: function () { onAction(); }, actionEnd: function () { onActionEnd(); }, setTool: setTool, get tool() { return tool; }, paw: paw };
 })();
 </script>
 </body>
